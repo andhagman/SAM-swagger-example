@@ -1,0 +1,64 @@
+options:
+  size: 2x
+
+image:
+  name: node:6.9.4
+
+stepdefinitions:
+  - buildandtest: &buildandtest
+      name: build-and-test
+      caches:
+        - node
+      script:
+        - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+        - npm install
+        - npm run transpile
+        - ./node_modules/.bin/yaml-into-yaml --base-file aws/template.yaml --mixin-file aws/swagger.yaml --selector Resources.SwaggerSamTestApi.Properties.DefinitionBody --output-file aws/merged-template.yaml
+      artifacts:
+        - dist/**
+        - aws/merged-template.yaml
+  - package: &package
+      name: package
+      caches:
+        - node
+      script:
+        - aws cloudformation package --template-file aws/merged-template.yaml --s3-bucket onebox-artifacts --s3-prefix sam-swagger-example-s3/1.0.$BITBUCKET_BUILD_NUMBER-$BITBUCKET_BRANCH --output-template-file aws/packaged-template.yaml
+      artifacts:
+        - aws/packaged-template.yaml
+  - deploytest: &deploytest
+      name: deploy-test
+      deployment: test
+      script:
+        - if [ "$BITBUCKET_BRANCH" == "master" ]; then ENV_SUFFIX=""; else ENV_SUFFIX=-$BITBUCKET_BRANCH; fi; # Set ENV_SUFFIX to an empty string or to "-<the-branch-name>"
+        - deploy test sam-swagger-example-test$ENV_SUFFIX aws/packaged-template.yaml aws/params.test.json
+  - undeploytest: &undeploytest
+      name: undeploy-test
+      trigger: manual
+      script:
+        - if [ "$BITBUCKET_BRANCH" == "master" ]; then ENV_SUFFIX=""; else ENV_SUFFIX=-$BITBUCKET_BRANCH; fi; # Set ENV_SUFFIX to an empty string or to "-<the-branch-name>"
+        - undeploy test sam-swagger-example-test$ENV_SUFFIX
+  - deployat: &deployat
+      name: deploy-at
+      deployment: staging
+      trigger: manual
+      script:
+        - deploy at sam-swagger-example-at aws/packaged-template.yaml aws/params.at.json
+  - deployprod: &deployprod
+      name: deploy-prod
+      deployment: production
+      trigger: manual
+      script:
+        - deploy prod sam-swagger-example-prod aws/packaged-template.yaml aws/params.prod.json
+pipelines:
+  default:
+    - step: *buildandtest
+    - step: *package
+    - step: *deploytest
+    - step: *undeploytest
+  branches:
+    master:
+      - step: *buildandtest
+      - step: *package
+      - step: *deploytest
+      - step: *deployat
+      - step: *deployprod

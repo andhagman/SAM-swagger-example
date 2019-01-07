@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: 'sam-swagger-example'
+Parameters:
+  MemorySize:
+    Type: Number
+    Default: 1024
+  Stage:
+    Type: String  
+Globals:
+  Function:
+    Runtime: nodejs8.10
+    MemorySize:
+      Ref: MemorySize
+    Timeout: 5
+    Environment:
+      Variables:
+        MemorySize:
+          Ref: MemorySize
+Resources:
+  TestTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: KEYS_ONLY
+      SSESpecification:
+        SSEEnabled: true
+
+  GetTestFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: ../dist/test-get
+      Handler: test-get.handler
+      Tracing: Active
+      Role:
+        Fn::GetAtt: [GetTestFunctionRole, Arn]
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /v1/test
+            Method: GET
+            RestApiId:
+              Ref: SwaggerSamTestApi
+  GetTestFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName:
+            Fn::Sub: ${TestTable}-GetTestFunction
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:*'
+                Resource:
+                  - Fn::GetAtt: [TestTable, Arn]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+
+  SwaggerSamTestApi:
+    Type: 'AWS::Serverless::Api'
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}
+      StageName: api
+      Cors:
+        AllowOrigin: "'*'"
+      DefinitionBody:
+        # The definition body will be concatenated with the Swagger file contents during build
